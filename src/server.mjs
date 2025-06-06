@@ -1,6 +1,6 @@
 import express from 'express';
 import cors from 'cors';
-import { connectToDatabase, getStockCollection, getReportsCollection } from './mongodb.mjs';
+import { connectToDatabase, getStockCollection, getReportsCollection, closeConnection } from './mongodb.mjs';
 import dotenv from 'dotenv';
 
 // Configurar dotenv
@@ -20,11 +20,19 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
 
 // Middleware de logging
 app.use((req, res, next) => {
-  console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
+  console.log(`${new Date().toISOString()} - ${req.method} ${req.path} - Origin: ${req.get('origin')}`);
+  next();
+});
+
+// Middleware para tratar erros de JSON inválido
+app.use((err, req, res, next) => {
+  if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
+    return res.status(400).json({ error: 'JSON inválido' });
+  }
   next();
 });
 
@@ -33,7 +41,8 @@ app.get('/', (req, res) => {
   res.json({ 
     status: 'ok', 
     environment: process.env.NODE_ENV,
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    version: '1.0.0'
   });
 });
 
@@ -43,7 +52,8 @@ app.get('/api/test-connection', async (req, res) => {
     await connectToDatabase();
     res.json({ 
       status: 'connected',
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      database: 'MongoDB Atlas'
     });
   } catch (error) {
     console.error('Erro de conexão:', error);
@@ -100,11 +110,17 @@ app.put('/api/stock', async (req, res) => {
 
     const result = await collection.updateOne(
       {},
-      { $set: { items, lastUpdate: new Date().toISOString() } },
+      { 
+        $set: { 
+          items,
+          lastUpdate: new Date().toISOString()
+        }
+      },
       { upsert: true }
     );
 
-    res.json(result);
+    const updatedStock = await collection.findOne();
+    res.json(updatedStock);
   } catch (error) {
     console.error('Erro ao atualizar estoque:', error);
     res.status(500).json({ error: 'Falha ao atualizar estoque' });
@@ -126,17 +142,26 @@ app.post('/api/stock/movement', async (req, res) => {
     }
 
     const movements = stock.movements || [];
-    movements.push({
+    const newMovement = {
       ...movement,
-      timestamp: new Date().toISOString()
-    });
+      timestamp: new Date().toISOString(),
+      id: Date.now().toString()
+    };
+    
+    movements.push(newMovement);
 
     const result = await collection.updateOne(
       {},
-      { $set: { movements } }
+      { 
+        $set: { 
+          movements,
+          lastUpdate: new Date().toISOString()
+        }
+      }
     );
 
-    res.json(result);
+    const updatedStock = await collection.findOne();
+    res.json(updatedStock);
   } catch (error) {
     console.error('Erro ao registrar movimentação:', error);
     res.status(500).json({ error: 'Falha ao registrar movimentação' });
@@ -147,7 +172,7 @@ app.post('/api/stock/movement', async (req, res) => {
 app.get('/api/reports', async (req, res) => {
   try {
     const collection = await getReportsCollection();
-    const reports = await collection.find({}).toArray();
+    const reports = await collection.find({}).sort({ 'header.date': -1 }).toArray();
     res.json(reports);
   } catch (error) {
     console.error('Erro ao buscar relatórios:', error);
@@ -180,11 +205,72 @@ app.post('/api/reports', async (req, res) => {
       return res.status(400).json({ error: 'Dados do relatório inválidos' });
     }
 
-    const result = await collection.insertOne(report);
-    res.status(201).json(result);
+    // Verificar se já existe um relatório para esta data
+    const existingReport = await collection.findOne({ 'header.date': report.header.date });
+    if (existingReport) {
+      return res.status(409).json({ error: 'Já existe um relatório para esta data' });
+    }
+
+    const result = await collection.insertOne({
+      ...report,
+      createdAt: new Date().toISOString()
+    });
+    
+    const savedReport = await collection.findOne({ _id: result.insertedId });
+    res.status(201).json(savedReport);
   } catch (error) {
     console.error('Erro ao salvar relatório:', error);
     res.status(500).json({ error: 'Falha ao salvar relatório' });
+  }
+});
+
+app.put('/api/reports/:date', async (req, res) => {
+  try {
+    const collection = await getReportsCollection();
+    const report = req.body;
+    const { date } = req.params;
+    
+    if (!report || !report.header || !report.header.date) {
+      return res.status(400).json({ error: 'Dados do relatório inválidos' });
+    }
+
+    const result = await collection.updateOne(
+      { 'header.date': date },
+      { 
+        $set: {
+          ...report,
+          updatedAt: new Date().toISOString()
+        }
+      }
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({ error: 'Relatório não encontrado' });
+    }
+
+    const updatedReport = await collection.findOne({ 'header.date': date });
+    res.json(updatedReport);
+  } catch (error) {
+    console.error('Erro ao atualizar relatório:', error);
+    res.status(500).json({ error: 'Falha ao atualizar relatório' });
+  }
+});
+
+app.delete('/reports/:date', async (req, res) => {
+  try {
+    const collection = await getReportsCollection();
+    const { date } = req.params;
+
+    const result = await collection.deleteOne({ 'header.date': date });
+
+    if (result.deletedCount === 0) {
+      return res.status(404).json({ error: 'Relatório não encontrado' });
+    }
+
+    res.json({ message: 'Relatório excluído com sucesso' });
+  } catch (error) {
+    console.error('Erro ao excluir relatório:', error);
+    res.status(500).json({ error: 'Falha ao excluir relatório' });
   }
 });
 
