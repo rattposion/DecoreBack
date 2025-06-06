@@ -1,19 +1,18 @@
-import { MongoClient } from 'mongodb';
+import { MongoClient, MongoClientOptions } from 'mongodb';
 import dotenv from 'dotenv';
 
 dotenv.config();
 
 // Configurações do MongoDB do Railway
-const MONGODB_HOST = process.env.MONGOHOST || 'mongodb.railway.internal';
-const MONGODB_PORT = process.env.MONGOPORT || '27017';
-const MONGODB_USER = process.env.MONGOUSER || 'mongo';
-const MONGODB_PASSWORD = process.env.MONGOPASSWORD || 'GSxIXVMc1EpMYKCkMFXQIzrCHIwnfGJC';
-const MONGODB_URL = process.env.MONGO_URL || `mongodb://${MONGODB_USER}:${MONGODB_PASSWORD}@${MONGODB_HOST}:${MONGODB_PORT}`;
+const MONGODB_URL = process.env.MONGO_PUBLIC_URL || process.env.MONGO_URL || 'mongodb://localhost:27017/decore_db';
 
-const options = {
+const options: MongoClientOptions = {
   maxPoolSize: 10,
-  serverSelectionTimeoutMS: 5000,
+  serverSelectionTimeoutMS: 30000,
   socketTimeoutMS: 45000,
+  retryWrites: true,
+  retryReads: true,
+  authSource: 'admin'
 };
 
 let client: MongoClient | null = null;
@@ -28,6 +27,7 @@ export async function connectToDatabase() {
       // Ping para verificar a conexão
       await client.db("admin").command({ ping: 1 });
       console.log("Ping ao banco de dados bem-sucedido");
+      console.log("URL de conexão:", MONGODB_URL.replace(/\/\/[^:]+:[^@]+@/, '//<credentials>@'));
     } catch (error) {
       console.error('Erro de conexão com MongoDB:', error);
       throw new Error('Falha ao conectar com o banco de dados');
