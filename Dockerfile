@@ -3,15 +3,14 @@ FROM node:18-alpine as builder
 
 WORKDIR /app
 
-# Copiar arquivos de configuração
-COPY package*.json ./
-COPY tsconfig.json ./
+# Primeiro, copiar todo o código fonte
+COPY . .
 
-# Instalar dependências
+# Remover node_modules e dist se existirem
+RUN rm -rf node_modules dist
+
+# Instalar todas as dependências (incluindo devDependencies)
 RUN npm install
-
-# Copiar código fonte
-COPY src ./src
 
 # Build do TypeScript
 RUN npm run build
@@ -26,7 +25,7 @@ COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/package*.json ./
 
 # Instalar apenas dependências de produção
-RUN npm ci --only=production
+RUN npm ci --omit=dev
 
 # Configurar variáveis de ambiente
 ENV NODE_ENV=production
@@ -36,4 +35,4 @@ ENV PORT=3000
 EXPOSE 3000
 
 # Comando para iniciar o servidor
-CMD ["npm", "start"] 
+CMD ["node", "dist/server.js"] 
