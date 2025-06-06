@@ -200,11 +200,66 @@ const updateReport: RequestHandler = async (req, res) => {
 const deleteReport: RequestHandler = async (req, res) => {
   try {
     const collection = await getReportsCollection();
-    const result = await collection.deleteOne({ 'header.date': req.params.date });
-    if (result.deletedCount === 0) {
+    const stockCollection = await getStockCollection();
+    
+    // Primeiro, buscar o relatório para saber as quantidades
+    const report = await collection.findOne({ 'header.date': req.params.date });
+    if (!report) {
       return res.status(404).json({ error: 'Relatório não encontrado' });
     }
-    res.json({ message: 'Relatório excluído com sucesso' });
+
+    // Calcular as quantidades totais do relatório
+    const totalV1 = [...(report.morning || []), ...(report.afternoon || [])].reduce((sum, c) => 
+      sum + (c.tested || 0), 0);
+    const totalV9 = [...(report.morning || []), ...(report.afternoon || [])].reduce((sum, c) => 
+      sum + (c.v9 || 0), 0);
+
+    // Buscar o estoque atual
+    const stock = await stockCollection.findOne();
+    if (!stock) {
+      return res.status(404).json({ error: 'Estoque não encontrado' });
+    }
+
+    // Remover as quantidades do estoque
+    const newV1Quantity = Math.max(0, (stock.items.v1.quantity || 0) - totalV1);
+    const newV9Quantity = Math.max(0, (stock.items.v9.quantity || 0) - totalV9);
+
+    // Criar movimento de ajuste no estoque
+    const adjustmentMovement = {
+      date: new Date().toISOString(),
+      type: 'adjustment',
+      source: 'SISTEMA',
+      destination: 'AJUSTE',
+      responsibleUser: 'Sistema',
+      observations: `Ajuste automático por exclusão do relatório de ${req.params.date}`,
+      quantity: totalV1 + totalV9
+    };
+
+    // Atualizar o estoque
+    await stockCollection.updateOne(
+      {},
+      {
+        $set: {
+          'items.v1.quantity': newV1Quantity,
+          'items.v1.lastUpdate': new Date().toISOString(),
+          'items.v9.quantity': newV9Quantity,
+          'items.v9.lastUpdate': new Date().toISOString()
+        },
+        $push: { movements: adjustmentMovement }
+      }
+    );
+
+    // Finalmente, excluir o relatório
+    const result = await collection.deleteOne({ 'header.date': req.params.date });
+    
+    // Buscar o estoque atualizado
+    const updatedStock = await stockCollection.findOne();
+
+    res.json({ 
+      message: 'Relatório excluído e estoque ajustado com sucesso',
+      deletedReport: report,
+      updatedStock: updatedStock
+    });
   } catch (error) {
     console.error('Erro ao excluir relatório:', error);
     res.status(500).json({ error: 'Falha ao excluir relatório' });
