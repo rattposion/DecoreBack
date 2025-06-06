@@ -22,7 +22,7 @@ let isConnecting = false;
 let retryCount = 0;
 const MAX_RETRIES = 5;
 
-export async function connectToDatabase() {
+export async function connectToDatabase(): Promise<MongoClient> {
   if (!client && !isConnecting) {
     isConnecting = true;
     try {
@@ -61,12 +61,17 @@ export async function connectToDatabase() {
       isConnecting = false;
     }
   }
+  
+  if (!client) {
+    throw new Error('Cliente MongoDB não está inicializado');
+  }
+  
   return client;
 }
 
 export async function getCollection(collectionName: string) {
-  const client = await connectToDatabase();
-  return client.db("decore_db").collection(collectionName);
+  const dbClient = await connectToDatabase();
+  return dbClient.db("decore_db").collection(collectionName);
 }
 
 export async function getReportsCollection() {
@@ -92,8 +97,8 @@ export async function closeConnection() {
 
 export async function testConnection() {
   try {
-    const client = await connectToDatabase();
-    await client.db("admin").command({ ping: 1 });
+    const dbClient = await connectToDatabase();
+    await dbClient.db("admin").command({ ping: 1 });
     return true;
   } catch (error) {
     console.error('Erro ao testar conexão com MongoDB:', error);
