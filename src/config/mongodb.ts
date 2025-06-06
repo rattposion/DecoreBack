@@ -1,20 +1,29 @@
-import { MongoClient, MongoClientOptions } from 'mongodb';
+import { MongoClient, MongoClientOptions, ServerApiVersion } from 'mongodb';
 import * as dotenv from 'dotenv';
 
 dotenv.config();
 
 // Configurações do MongoDB do Railway
-const MONGODB_URL = process.env.MONGO_URL || 'mongodb://mongo:GSxIXvNciEpMYKCHMrAQIzrcHIwnfGJC@turntable.proxy.rlwy.net:47692';
+const MONGODB_URL = 'mongodb://mongo:GSxIXvNciEpMYKCHMrAQIzrcHIwnfGJC@turntable.proxy.rlwy.net:47692/decore_db';
 
 const options: MongoClientOptions = {
-  maxPoolSize: 10,
-  serverSelectionTimeoutMS: 60000, // Aumentado para 60 segundos
-  socketTimeoutMS: 60000, // Aumentado para 60 segundos
-  connectTimeoutMS: 60000, // Aumentado para 60 segundos
+  maxPoolSize: 1, // Reduzido para minimizar conexões
+  serverSelectionTimeoutMS: 30000,
+  socketTimeoutMS: 45000,
+  connectTimeoutMS: 30000,
   retryWrites: true,
   retryReads: true,
   authSource: 'admin',
-  directConnection: true // Força conexão direta
+  directConnection: true,
+  serverApi: {
+    version: ServerApiVersion.v1,
+    strict: true,
+    deprecationErrors: true,
+  },
+  // Configurações SSL/TLS
+  ssl: true,
+  tls: true,
+  tlsAllowInvalidCertificates: true, // Apenas para desenvolvimento
 };
 
 let client: MongoClient | null = null;
@@ -27,34 +36,65 @@ export async function connectToDatabase(): Promise<MongoClient> {
     isConnecting = true;
     try {
       console.log('Tentando conectar ao MongoDB...');
+      
+      // Criar nova instância do cliente
       client = new MongoClient(MONGODB_URL, options);
       
-      // Tentar conectar com retry
       while (retryCount < MAX_RETRIES) {
         try {
+          // Tentar estabelecer conexão
           await client.connect();
           console.log('Conectado ao MongoDB');
           
-          // Ping para verificar a conexão
-          await client.db("admin").command({ ping: 1 });
+          // Verificar a conexão com ping
+          const adminDb = client.db("admin");
+          await adminDb.command({ ping: 1 });
           console.log("Ping ao banco de dados bem-sucedido");
-          console.log("URL de conexão:", MONGODB_URL.replace(/\/\/[^:]+:[^@]+@/, '//<credentials>@'));
           
-          // Resetar contadores após sucesso
+          // Tentar acessar o banco de dados principal
+          const mainDb = client.db("decore_db");
+          await mainDb.command({ ping: 1 });
+          console.log("Banco de dados principal acessível");
+          
+          // Log da URL (sem credenciais)
+          const safeUrl = MONGODB_URL.replace(/\/\/[^:]+:[^@]+@/, '//<credentials>@');
+          console.log("URL de conexão:", safeUrl);
+          
           retryCount = 0;
           break;
         } catch (error) {
           retryCount++;
           console.error(`Tentativa ${retryCount} falhou:`, error);
+          
           if (retryCount >= MAX_RETRIES) {
             throw new Error(`Falha após ${MAX_RETRIES} tentativas de conexão`);
           }
+          
+          // Fechar a conexão atual antes de tentar novamente
+          try {
+            await client.close(true);
+          } catch (closeError) {
+            console.error('Erro ao fechar conexão:', closeError);
+          }
+          
           // Esperar antes de tentar novamente (exponential backoff)
-          await new Promise(resolve => setTimeout(resolve, Math.min(1000 * Math.pow(2, retryCount), 10000)));
+          const delay = Math.min(1000 * Math.pow(2, retryCount), 10000);
+          console.log(`Aguardando ${delay}ms antes da próxima tentativa...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          
+          // Criar nova instância do cliente para a próxima tentativa
+          client = new MongoClient(MONGODB_URL, options);
         }
       }
     } catch (error) {
       console.error('Erro fatal de conexão com MongoDB:', error);
+      if (client) {
+        try {
+          await client.close(true);
+        } catch (closeError) {
+          console.error('Erro ao fechar conexão após falha:', closeError);
+        }
+      }
       client = null;
       throw new Error('Falha ao conectar com o banco de dados');
     } finally {
