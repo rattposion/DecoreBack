@@ -1,4 +1,4 @@
-import express from 'express';
+import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import { connectToDatabase, getStockCollection, getReportsCollection, closeConnection } from './config/mongodb.js';
 import dotenv from 'dotenv';
@@ -29,7 +29,7 @@ app.use((req, res, next) => {
 });
 
 // Middleware para tratar erros de JSON inválido
-app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
   if (err instanceof SyntaxError && 'body' in err) {
     return res.status(400).json({ error: 'JSON inválido' });
   }
@@ -99,7 +99,71 @@ app.get('/api/stock', async (req: express.Request, res: express.Response) => {
   }
 });
 
-// ... resto das rotas ...
+// Rotas de Relatórios
+app.get('/api/reports', async (req: Request, res: Response) => {
+  try {
+    const collection = await getReportsCollection();
+    const reports = await collection.find({}).toArray();
+    res.json(reports);
+  } catch (error: unknown) {
+    console.error('Erro ao buscar relatórios:', error);
+    res.status(500).json({ error: 'Falha ao buscar relatórios' });
+  }
+});
+
+app.get('/api/reports/:date', async (req: express.Request, res: express.Response) => {
+  try {
+    const collection = await getReportsCollection();
+    const report = await collection.findOne({ 'header.date': req.params.date });
+    if (!report) {
+      return res.status(404).json({ error: 'Relatório não encontrado' });
+    }
+    res.json(report);
+  } catch (error) {
+    console.error('Erro ao buscar relatório:', error);
+    res.status(500).json({ error: 'Falha ao buscar relatório' });
+  }
+});
+
+app.post('/api/reports', async (req: express.Request, res: express.Response) => {
+  try {
+    const collection = await getReportsCollection();
+    const result = await collection.insertOne(req.body);
+    res.status(201).json(result);
+  } catch (error) {
+    console.error('Erro ao criar relatório:', error);
+    res.status(500).json({ error: 'Falha ao criar relatório' });
+  }
+});
+
+app.put('/api/reports/:date', async (req: express.Request, res: express.Response) => {
+  try {
+    const collection = await getReportsCollection();
+    const result = await collection.updateOne(
+      { 'header.date': req.params.date },
+      { $set: req.body },
+      { upsert: true }
+    );
+    res.json(result);
+  } catch (error) {
+    console.error('Erro ao atualizar relatório:', error);
+    res.status(500).json({ error: 'Falha ao atualizar relatório' });
+  }
+});
+
+app.delete('/api/reports/:date', async (req: express.Request, res: express.Response) => {
+  try {
+    const collection = await getReportsCollection();
+    const result = await collection.deleteOne({ 'header.date': req.params.date });
+    if (result.deletedCount === 0) {
+      return res.status(404).json({ error: 'Relatório não encontrado' });
+    }
+    res.json({ message: 'Relatório excluído com sucesso' });
+  } catch (error) {
+    console.error('Erro ao excluir relatório:', error);
+    res.status(500).json({ error: 'Falha ao excluir relatório' });
+  }
+});
 
 // Iniciar servidor
 const startServer = async () => {
