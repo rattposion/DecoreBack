@@ -264,22 +264,19 @@ const deleteReport: AsyncRequestHandler = async (req, res) => {
     };
 
     // Atualizar o estoque
-    await stockCollection.updateOne(
-      {},
-      {
-        $set: {
-          'items.v1.quantity': newV1Quantity,
-          'items.v1.lastUpdate': new Date().toISOString(),
-          'items.v9.quantity': newV9Quantity,
-          'items.v9.lastUpdate': new Date().toISOString()
-        },
-        $push: {
-          movements: {
-            $each: [movement]
-          }
-        }
+    const updateOperation = {
+      $set: {
+        'items.v1.quantity': newV1Quantity,
+        'items.v1.lastUpdate': new Date().toISOString(),
+        'items.v9.quantity': newV9Quantity,
+        'items.v9.lastUpdate': new Date().toISOString()
+      },
+      $push: {
+        movements: movement
       }
-    );
+    } as any; // Usar type assertion temporariamente para resolver o erro de tipagem
+
+    await stockCollection.updateOne({}, updateOperation);
 
     // Finalmente, excluir o relatório
     const result = await collection.deleteOne({ 'header.date': req.params.date });
