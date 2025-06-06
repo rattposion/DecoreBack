@@ -28,13 +28,6 @@ app.use((req, res, next) => {
   next();
 });
 
-// Função para obter a coleção de estoque
-async function getStockCollection() {
-  const client = await connectToDatabase();
-  const db = client.db("decore_db");
-  return db.collection('stock');
-}
-
 // Rota de healthcheck
 app.get('/', (req, res) => {
   res.json({ 
