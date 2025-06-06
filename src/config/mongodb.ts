@@ -83,4 +83,39 @@ export async function connectToDatabase(): Promise<MongoClient> {
   return client;
 }
 
-// ... resto do código permanece igual ...
+export async function getCollection(collectionName: string) {
+  const dbClient = await connectToDatabase();
+  return dbClient.db("decore_db").collection(collectionName);
+}
+
+export async function getReportsCollection() {
+  return getCollection('relatorios');
+}
+
+export async function getStockCollection() {
+  return getCollection('stock');
+}
+
+export async function closeConnection() {
+  if (client) {
+    try {
+      await client.close();
+      client = null;
+      console.log('Conexão com MongoDB fechada');
+    } catch (error) {
+      console.error('Erro ao fechar conexão:', error);
+      throw new Error('Falha ao fechar conexão com o banco de dados');
+    }
+  }
+}
+
+export async function testConnection() {
+  try {
+    const dbClient = await connectToDatabase();
+    await dbClient.db("admin").command({ ping: 1 });
+    return true;
+  } catch (error) {
+    console.error('Erro ao testar conexão com MongoDB:', error);
+    return false;
+  }
+} 
