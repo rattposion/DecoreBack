@@ -3,7 +3,13 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-const uri = process.env.MONGODB_URI || 'mongodb+srv://decore:Wesley26.@decore.xvhk00w.mongodb.net/decore_db?retryWrites=true&w=majority';
+// Usando as variáveis do Railway
+const MONGODB_HOST = process.env.MONGOHOST || 'mongodb.railway.internal';
+const MONGODB_PORT = process.env.MONGOPORT || '27017';
+const MONGODB_USER = process.env.MONGOUSER || 'mongo';
+const MONGODB_PASSWORD = process.env.MONGOPASSWORD || 'GSxIXVMc1EpMYKCkMFXQIzrCHIwnfGJC';
+const MONGODB_URL = process.env.MONGO_URL || 'mongodb://mongo:GSxIXVMc1EpMYKCkMFXQIzrCHIwnfGJC@mongodb.railway.internal:27017';
+
 const options = {
   maxPoolSize: 10,
   serverSelectionTimeoutMS: 5000,
@@ -15,7 +21,7 @@ let client;
 export async function connectToDatabase() {
   if (!client) {
     try {
-      client = await MongoClient.connect(uri, options);
+      client = await MongoClient.connect(MONGODB_URL, options);
       console.log('Conectado ao MongoDB');
       
       // Ping para verificar a conexão
