@@ -1,4 +1,4 @@
-import express, { Request, Response, NextFunction } from 'express';
+import express, { Request, Response, NextFunction, ErrorRequestHandler, RequestHandler } from 'express';
 import cors from 'cors';
 import { connectToDatabase, getStockCollection, getReportsCollection, closeConnection } from './config/mongodb.js';
 import dotenv from 'dotenv';
@@ -29,12 +29,15 @@ app.use((req, res, next) => {
 });
 
 // Middleware para tratar erros de JSON inválido
-app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
+const errorHandler: ErrorRequestHandler = (err, req, res, next) => {
   if (err instanceof SyntaxError && 'body' in err) {
-    return res.status(400).json({ error: 'JSON inválido' });
+    res.status(400).json({ error: 'JSON inválido' });
+    return;
   }
-  next();
-});
+  next(err);
+};
+
+app.use(errorHandler);
 
 // Rota de healthcheck
 app.get('/', (req: express.Request, res: express.Response) => {
@@ -65,53 +68,96 @@ app.get('/api/test-connection', async (req: express.Request, res: express.Respon
 });
 
 // Rotas de Estoque
-app.get('/api/stock', async (req: express.Request, res: express.Response) => {
+const getStock: RequestHandler = async (req, res) => {
+  try {
+    const collection = await getStockCollection();
+    const stock = await collection.findOne();
+    res.json(stock);
+  } catch (error) {
+    console.error('Erro ao buscar estoque:', error);
+    res.status(500).json({ error: 'Falha ao buscar estoque' });
+  }
+};
+
+const updateStock: RequestHandler = async (req, res) => {
+  try {
+    const collection = await getStockCollection();
+    const result = await collection.updateOne({}, { $set: req.body }, { upsert: true });
+    res.json(result);
+  } catch (error) {
+    console.error('Erro ao atualizar estoque:', error);
+    res.status(500).json({ error: 'Falha ao atualizar estoque' });
+  }
+};
+
+const getMovements: RequestHandler = async (req, res) => {
+  try {
+    const collection = await getStockCollection();
+    const stock = await collection.findOne();
+    const movements = stock?.movements || [];
+    res.json(movements);
+  } catch (error) {
+    console.error('Erro ao buscar movimentações:', error);
+    res.status(500).json({ error: 'Falha ao buscar movimentações' });
+  }
+};
+
+const addMovement: RequestHandler = async (req, res) => {
   try {
     const collection = await getStockCollection();
     const stock = await collection.findOne();
     
     if (!stock) {
-      const initialStock = {
-        items: {
-          v1: {
-            model: 'ZTE 670 V1',
-            quantity: 0,
-            lastUpdate: new Date().toISOString(),
-            status: 'DISPONÍVEL'
-          },
-          v9: {
-            model: 'ZTE 670 V9',
-            quantity: 0,
-            lastUpdate: new Date().toISOString(),
-            status: 'DISPONÍVEL'
-          }
-        },
-        movements: []
-      };
-      await collection.insertOne(initialStock);
-      res.json(initialStock);
-    } else {
-      res.json(stock);
+      return res.status(404).json({ error: 'Estoque não encontrado' });
     }
+
+    const movement = {
+      ...req.body,
+      timestamp: new Date().toISOString()
+    };
+
+    await collection.updateOne(
+      {},
+      { 
+        $push: { movements: movement },
+        $set: { 
+          [`items.${req.body.model === 'ZTE 670 V1' ? 'v1' : 'v9'}.quantity`]: req.body.newQuantity,
+          [`items.${req.body.model === 'ZTE 670 V1' ? 'v1' : 'v9'}.lastUpdate`]: new Date().toISOString()
+        }
+      }
+    );
+
+    res.status(201).json(movement);
   } catch (error) {
-    console.error('Erro ao buscar estoque:', error);
-    res.status(500).json({ error: 'Falha ao buscar estoque' });
+    console.error('Erro ao adicionar movimento:', error);
+    res.status(500).json({ error: 'Falha ao adicionar movimento' });
   }
-});
+};
 
 // Rotas de Relatórios
-app.get('/api/reports', async (req: Request, res: Response) => {
+const getReports: RequestHandler = async (req, res) => {
   try {
     const collection = await getReportsCollection();
     const reports = await collection.find({}).toArray();
     res.json(reports);
-  } catch (error: unknown) {
+  } catch (error) {
     console.error('Erro ao buscar relatórios:', error);
     res.status(500).json({ error: 'Falha ao buscar relatórios' });
   }
-});
+};
 
-app.get('/api/reports/:date', async (req: express.Request, res: express.Response) => {
+const createReport: RequestHandler = async (req, res) => {
+  try {
+    const collection = await getReportsCollection();
+    const result = await collection.insertOne(req.body);
+    res.status(201).json(result);
+  } catch (error) {
+    console.error('Erro ao criar relatório:', error);
+    res.status(500).json({ error: 'Falha ao criar relatório' });
+  }
+};
+
+const getReport: RequestHandler = async (req, res) => {
   try {
     const collection = await getReportsCollection();
     const report = await collection.findOne({ 'header.date': req.params.date });
@@ -123,20 +169,9 @@ app.get('/api/reports/:date', async (req: express.Request, res: express.Response
     console.error('Erro ao buscar relatório:', error);
     res.status(500).json({ error: 'Falha ao buscar relatório' });
   }
-});
+};
 
-app.post('/api/reports', async (req: express.Request, res: express.Response) => {
-  try {
-    const collection = await getReportsCollection();
-    const result = await collection.insertOne(req.body);
-    res.status(201).json(result);
-  } catch (error) {
-    console.error('Erro ao criar relatório:', error);
-    res.status(500).json({ error: 'Falha ao criar relatório' });
-  }
-});
-
-app.put('/api/reports/:date', async (req: express.Request, res: express.Response) => {
+const updateReport: RequestHandler = async (req, res) => {
   try {
     const collection = await getReportsCollection();
     const result = await collection.updateOne(
@@ -149,9 +184,9 @@ app.put('/api/reports/:date', async (req: express.Request, res: express.Response
     console.error('Erro ao atualizar relatório:', error);
     res.status(500).json({ error: 'Falha ao atualizar relatório' });
   }
-});
+};
 
-app.delete('/api/reports/:date', async (req: express.Request, res: express.Response) => {
+const deleteReport: RequestHandler = async (req, res) => {
   try {
     const collection = await getReportsCollection();
     const result = await collection.deleteOne({ 'header.date': req.params.date });
@@ -163,7 +198,27 @@ app.delete('/api/reports/:date', async (req: express.Request, res: express.Respo
     console.error('Erro ao excluir relatório:', error);
     res.status(500).json({ error: 'Falha ao excluir relatório' });
   }
-});
+};
+
+// Configurar rotas
+app.route('/api/stock')
+  .get(getStock)
+  .put(updateStock);
+
+app.route('/api/stock/movements')
+  .get(getMovements);
+
+app.route('/api/stock/movement')
+  .post(addMovement);
+
+app.route('/api/reports')
+  .get(getReports)
+  .post(createReport);
+
+app.route('/api/reports/:date')
+  .get(getReport)
+  .put(updateReport)
+  .delete(deleteReport);
 
 // Iniciar servidor
 const startServer = async () => {
