@@ -116,18 +116,29 @@ const addMovement: RequestHandler = async (req, res) => {
       timestamp: new Date().toISOString()
     };
 
-    await collection.updateOne(
+    const modelKey = req.body.model === 'ZTE 670 V1' ? 'v1' : 'v9';
+    const currentQuantity = stock.items[modelKey].quantity || 0;
+    const quantityChange = req.body.type === 'entry' ? req.body.quantity : -req.body.quantity;
+    const newQuantity = currentQuantity + quantityChange;
+
+    if (newQuantity < 0) {
+      return res.status(400).json({ error: 'Quantidade insuficiente em estoque' });
+    }
+
+    const result = await collection.updateOne(
       {},
       { 
         $push: { movements: movement },
         $set: { 
-          [`items.${req.body.model === 'ZTE 670 V1' ? 'v1' : 'v9'}.quantity`]: req.body.newQuantity,
-          [`items.${req.body.model === 'ZTE 670 V1' ? 'v1' : 'v9'}.lastUpdate`]: new Date().toISOString()
+          [`items.${modelKey}.quantity`]: newQuantity,
+          [`items.${modelKey}.lastUpdate`]: new Date().toISOString()
         }
       }
     );
 
-    res.status(201).json(movement);
+    // Buscar o estoque atualizado
+    const updatedStock = await collection.findOne();
+    res.status(201).json(updatedStock);
   } catch (error) {
     console.error('Erro ao adicionar movimento:', error);
     res.status(500).json({ error: 'Falha ao adicionar movimento' });
