@@ -1,7 +1,6 @@
 import express, { Request, Response, NextFunction, ErrorRequestHandler } from 'express';
 import cors from 'cors';
 import { connectToDatabase, getStockCollection, getReportsCollection, closeConnection } from './config/mongodb.js';
-import { UpdateFilter, Document } from 'mongodb';
 import dotenv from 'dotenv';
 
 // Configurar dotenv
@@ -275,7 +274,9 @@ const deleteReport: AsyncRequestHandler = async (req, res) => {
           'items.v9.lastUpdate': new Date().toISOString()
         },
         $push: {
-          movements: movement
+          movements: {
+            $each: [movement]
+          }
         }
       }
     );
