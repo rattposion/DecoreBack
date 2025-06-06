@@ -1,6 +1,6 @@
 import express from 'express';
 import cors from 'cors';
-import { connectToDatabase, getStockCollection, getReportsCollection, closeConnection } from './mongodb.mjs';
+import { connectToDatabase, getStockCollection, getReportsCollection, closeConnection } from './config/mongodb.js';
 import dotenv from 'dotenv';
 
 // Configurar dotenv
@@ -287,20 +287,20 @@ app.use((err, req, res, next) => {
 const startServer = async () => {
   try {
     // Tentar conectar ao MongoDB antes de iniciar o servidor
+    console.log('Iniciando servidor...');
+    console.log('Ambiente:', process.env.NODE_ENV || 'development');
+    
     await connectToDatabase();
+    console.log('Conexão com MongoDB estabelecida');
     
     const server = app.listen(port, '0.0.0.0', () => {
-      console.log(`Servidor rodando em modo ${process.env.NODE_ENV || 'development'}`);
-      console.log(`URL do servidor: ${process.env.NODE_ENV === 'production' ? process.env.RAILWAY_STATIC_URL : `http://localhost:${port}`}`);
+      console.log(`Servidor rodando na porta ${port}`);
+      console.log(`URL do servidor: ${process.env.RAILWAY_STATIC_URL || `http://localhost:${port}`}`);
     });
 
     // Tratamento de erros do servidor
     server.on('error', (error) => {
-      if (error.code === 'EADDRINUSE') {
-        console.error(`Porta ${port} já está em uso. Tente outra porta.`);
-      } else {
-        console.error('Erro no servidor:', error);
-      }
+      console.error('Erro no servidor:', error);
       process.exit(1);
     });
 
@@ -310,7 +310,7 @@ const startServer = async () => {
       server.close(async () => {
         try {
           await closeConnection();
-          console.log('Servidor fechado');
+          console.log('Servidor fechado com sucesso');
           process.exit(0);
         } catch (error) {
           console.error('Erro ao fechar servidor:', error);
@@ -325,25 +325,8 @@ const startServer = async () => {
   }
 };
 
-// Iniciar o servidor com retry
-let retryCount = 0;
-const MAX_RETRIES = 5;
-
-const startWithRetry = async () => {
-  try {
-    await startServer();
-  } catch (error) {
-    retryCount++;
-    console.error(`Tentativa ${retryCount} de iniciar o servidor falhou:`, error);
-    
-    if (retryCount < MAX_RETRIES) {
-      console.log(`Tentando novamente em ${retryCount * 5} segundos...`);
-      setTimeout(startWithRetry, retryCount * 5000);
-    } else {
-      console.error(`Falha após ${MAX_RETRIES} tentativas. Encerrando.`);
-      process.exit(1);
-    }
-  }
-};
-
-startWithRetry(); 
+// Iniciar o servidor
+startServer().catch(error => {
+  console.error('Erro ao iniciar aplicação:', error);
+  process.exit(1);
+}); 
