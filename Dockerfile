@@ -1,31 +1,36 @@
 # Estágio de build
-FROM node:18-alpine as builder
-
-WORKDIR /app
-
-# Primeiro, copiar todo o código fonte
-COPY . .
-
-# Remover node_modules e dist se existirem
-RUN rm -rf node_modules dist
-
-# Instalar todas as dependências (incluindo devDependencies)
-RUN npm install
-
-# Build do TypeScript
-RUN npm run build
-
-# Estágio de produção
 FROM node:18-alpine
 
+# Instalar ferramentas necessárias
+RUN apk add --no-cache python3 make g++
+
 WORKDIR /app
 
-# Copiar apenas os arquivos necessários do estágio de build
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/package*.json ./
+# Copiar package.json e package-lock.json
+COPY package*.json ./
 
-# Instalar apenas dependências de produção
-RUN npm ci --omit=dev
+# Instalar todas as dependências
+RUN npm install
+
+# Copiar arquivos de configuração
+COPY tsconfig.json ./
+
+# Copiar código fonte
+COPY src ./src
+
+# Verificar estrutura de arquivos
+RUN ls -la && \
+    echo "Conteúdo de /app:" && \
+    ls -R
+
+# Compilar TypeScript
+RUN npm run build
+
+# Verificar a compilação
+RUN ls -la dist
+
+# Remover devDependencies
+RUN npm prune --production
 
 # Configurar variáveis de ambiente
 ENV NODE_ENV=production
