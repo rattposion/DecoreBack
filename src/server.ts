@@ -296,16 +296,32 @@ const deleteReport: AsyncRequestHandler = async (req, res) => {
     const newV1Quantity = Math.max(0, (stock.items.v1.quantity || 0) - totalV1);
     const newV9Quantity = Math.max(0, (stock.items.v9.quantity || 0) - totalV9);
 
-    // Criar movimento de ajuste
-    const movement: Movement = {
-      date: new Date().toISOString(),
-      type: 'adjustment',
-      source: 'SISTEMA',
-      destination: 'AJUSTE',
-      responsibleUser: 'Sistema',
-      observations: `Ajuste automático por exclusão do relatório de ${req.params.date}`,
-      quantity: totalV1 + totalV9
-    };
+    // Criar movimentos de ajuste separados para V1 e V9
+    const movements: Movement[] = [];
+    
+    if (totalV1 > 0) {
+      movements.push({
+        date: new Date().toISOString(),
+        type: 'exit',
+        source: 'ESTOQUE',
+        destination: 'AJUSTE',
+        responsibleUser: 'Sistema',
+        observations: `Saída por exclusão do relatório de ${req.params.date} - ZTE 670 V1`,
+        quantity: totalV1
+      });
+    }
+
+    if (totalV9 > 0) {
+      movements.push({
+        date: new Date().toISOString(),
+        type: 'exit',
+        source: 'ESTOQUE',
+        destination: 'AJUSTE',
+        responsibleUser: 'Sistema',
+        observations: `Saída por exclusão do relatório de ${req.params.date} - ZTE 670 V9`,
+        quantity: totalV9
+      });
+    }
 
     // Atualizar o estoque
     // Primeiro, atualizar as quantidades
@@ -318,12 +334,16 @@ const deleteReport: AsyncRequestHandler = async (req, res) => {
       }
     });
 
-    // Depois, adicionar o movimento ao array
-    await stockCollection.updateOne({}, {
-      $push: {
-        movements: movement
-      }
-    } as any); // Usar type assertion apenas para a operação $push
+    // Depois, adicionar os movimentos ao array
+    if (movements.length > 0) {
+      await stockCollection.updateOne({}, {
+        $push: {
+          movements: {
+            $each: movements
+          }
+        }
+      } as any);
+    }
 
     // Finalmente, excluir o relatório
     const result = await collection.deleteOne({ 'header.date': req.params.date });
