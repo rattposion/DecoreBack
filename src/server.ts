@@ -221,61 +221,40 @@ const addMovement: AsyncRequestHandler = async (req, res) => {
   }
 };
 
+// Excluir movimento
 const deleteMovement: AsyncRequestHandler = async (req, res) => {
   try {
+    const { date } = req.params;
     const collection = await getStockCollection();
-    const stock = await collection.findOne<StockDocument>();
-    const movementDate = req.params.date;
-    
+    const stock = await collection.findOne();
+
     if (!stock) {
-      res.status(404).json({ error: 'Estoque não encontrado' });
-      return;
+      return res.status(404).json({ error: 'Estoque não encontrado' });
     }
 
     // Encontrar o movimento a ser excluído
-    const movementToDelete = stock.movements.find(m => m.date === movementDate);
-    if (!movementToDelete) {
-      res.status(404).json({ error: 'Movimento não encontrado' });
-      return;
+    const movementIndex = stock.movements.findIndex((m: Movement) => m.date === date);
+    if (movementIndex === -1) {
+      return res.status(404).json({ error: 'Movimento não encontrado' });
     }
 
-    // Calcular o ajuste no estoque
-    const modelKey = movementToDelete.type === 'entry' ? 
-      (movementToDelete.observations.includes('V1') ? 'v1' : 'v9') :
-      (movementToDelete.observations.includes('V1') ? 'v1' : 'v9');
+    const movement = stock.movements[movementIndex];
 
-    const currentQuantity = stock.items[modelKey].quantity || 0;
-    // Se era uma entrada, subtrair; se era uma saída, adicionar
-    const quantityChange = movementToDelete.type === 'entry' ? 
-      -movementToDelete.quantity : 
-      movementToDelete.quantity;
-    
-    const newQuantity = currentQuantity + quantityChange;
-
-    if (newQuantity < 0) {
-      res.status(400).json({ error: 'Não é possível excluir este movimento pois resultaria em estoque negativo' });
-      return;
+    // Atualizar quantidade no estoque
+    const model = movement.model === 'ZTE 670 V1' ? 'v1' : 'v9';
+    if (movement.type === 'entry') {
+      stock.items[model].quantity -= movement.quantity;
+    } else {
+      stock.items[model].quantity += movement.quantity;
     }
 
-    // Atualizar o estoque e remover o movimento
-    await collection.updateOne(
-      {},
-      {
-        $pull: { movements: { date: movementDate } } as unknown as PullOperator<StockDocument>,
-        $set: {
-          [`items.${modelKey}.quantity`]: newQuantity,
-          [`items.${modelKey}.lastUpdate`]: new Date().toISOString()
-        }
-      }
-    );
+    // Remover o movimento
+    stock.movements.splice(movementIndex, 1);
 
-    // Buscar o estoque atualizado
-    const updatedStock = await collection.findOne<StockDocument>();
-    res.json({
-      message: 'Movimento excluído e estoque atualizado com sucesso',
-      updatedStock
-    });
+    // Atualizar o estoque
+    await collection.updateOne({}, { $set: stock });
 
+    res.json({ message: 'Movimento excluído com sucesso', updatedStock: stock });
   } catch (error) {
     console.error('Erro ao excluir movimento:', error);
     res.status(500).json({ error: 'Falha ao excluir movimento' });
