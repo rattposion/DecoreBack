@@ -2,6 +2,7 @@ import express, { Request, Response, NextFunction, ErrorRequestHandler, RequestH
 import cors from 'cors';
 import { connectToDatabase, getStockCollection, getReportsCollection, closeConnection } from './config/mongodb.js';
 import dotenv from 'dotenv';
+import { ParamsDictionary } from 'express-serve-static-core';
 
 // Configurar dotenv
 dotenv.config();
@@ -67,6 +68,11 @@ app.get('/api/test-connection', async (req: express.Request, res: express.Respon
   }
 });
 
+type CustomRequestHandler = (
+  req: Request<ParamsDictionary>,
+  res: Response
+) => Promise<void> | void;
+
 // Rotas de Estoque
 const getStock: RequestHandler = async (req, res) => {
   try {
@@ -102,13 +108,14 @@ const getMovements: RequestHandler = async (req, res) => {
   }
 };
 
-const addMovement: RequestHandler = async (req, res) => {
+const addMovement: CustomRequestHandler = async (req, res) => {
   try {
     const collection = await getStockCollection();
     const stock = await collection.findOne();
     
     if (!stock) {
-      return res.status(404).json({ error: 'Estoque não encontrado' });
+      res.status(404).json({ error: 'Estoque não encontrado' });
+      return;
     }
 
     const movement = {
@@ -168,12 +175,13 @@ const createReport: RequestHandler = async (req, res) => {
   }
 };
 
-const getReport: RequestHandler = async (req, res) => {
+const getReport: CustomRequestHandler = async (req, res) => {
   try {
     const collection = await getReportsCollection();
     const report = await collection.findOne({ 'header.date': req.params.date });
     if (!report) {
-      return res.status(404).json({ error: 'Relatório não encontrado' });
+      res.status(404).json({ error: 'Relatório não encontrado' });
+      return;
     }
     res.json(report);
   } catch (error) {
@@ -190,6 +198,7 @@ const updateReport: RequestHandler = async (req, res) => {
       { $set: req.body },
       { upsert: true }
     );
+ 
     res.json(result);
   } catch (error) {
     console.error('Erro ao atualizar relatório:', error);
@@ -197,7 +206,7 @@ const updateReport: RequestHandler = async (req, res) => {
   }
 };
 
-const deleteReport: RequestHandler = async (req, res) => {
+const deleteReport: CustomRequestHandler = async (req, res) => {
   try {
     const collection = await getReportsCollection();
     const stockCollection = await getStockCollection();
@@ -224,17 +233,6 @@ const deleteReport: RequestHandler = async (req, res) => {
     const newV1Quantity = Math.max(0, (stock.items.v1.quantity || 0) - totalV1);
     const newV9Quantity = Math.max(0, (stock.items.v9.quantity || 0) - totalV9);
 
-    // Criar movimento de ajuste no estoque
-    const adjustmentMovement = {
-      date: new Date().toISOString(),
-      type: 'adjustment',
-      source: 'SISTEMA',
-      destination: 'AJUSTE',
-      responsibleUser: 'Sistema',
-      observations: `Ajuste automático por exclusão do relatório de ${req.params.date}`,
-      quantity: totalV1 + totalV9
-    };
-
     // Atualizar o estoque
     await stockCollection.updateOne(
       {},
@@ -245,7 +243,19 @@ const deleteReport: RequestHandler = async (req, res) => {
           'items.v9.quantity': newV9Quantity,
           'items.v9.lastUpdate': new Date().toISOString()
         },
-        $push: { movements: adjustmentMovement }
+        $push: { 
+          movements: {
+            $each: [{
+              date: new Date().toISOString(),
+              type: 'adjustment',
+              source: 'SISTEMA',
+              destination: 'AJUSTE',
+              responsibleUser: 'Sistema',
+              observations: `Ajuste automático por exclusão do relatório de ${req.params.date}`,
+              quantity: totalV1 + totalV9
+            }]
+          }
+        }
       }
     );
 
