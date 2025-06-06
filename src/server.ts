@@ -1,6 +1,6 @@
 import express from 'express';
 import cors from 'cors';
-import { connectToDatabase, getStockCollection, getReportsCollection, closeConnection } from './config/mongodb';
+import { connectToDatabase, getStockCollection, getReportsCollection, closeConnection } from './config/mongodb.js';
 import dotenv from 'dotenv';
 
 // Configurar dotenv
@@ -30,7 +30,7 @@ app.use((req, res, next) => {
 
 // Middleware para tratar erros de JSON inválido
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
-  if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
+  if (err instanceof SyntaxError && 'body' in err) {
     return res.status(400).json({ error: 'JSON inválido' });
   }
   next();
@@ -110,7 +110,7 @@ const startServer = async () => {
     await connectToDatabase();
     console.log('Conexão com MongoDB estabelecida');
     
-    const server = app.listen(port, '0.0.0.0', () => {
+    const server = app.listen(Number(port), '0.0.0.0', () => {
       console.log(`Servidor rodando na porta ${port}`);
       console.log(`URL do servidor: ${process.env.RAILWAY_STATIC_URL || `http://localhost:${port}`}`);
     });
