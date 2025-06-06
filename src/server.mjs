@@ -12,7 +12,7 @@ const port = process.env.PORT || 3001;
 // Configurar CORS para permitir apenas origens específicas em produção
 const corsOptions = {
   origin: process.env.NODE_ENV === 'production'
-    ? ['https://decore-s.vercel.app', 'http://localhost:3000']
+    ? ['https://decore-s.vercel.app', 'http://localhost:3000', 'https://decore-frontend.vercel.app']
     : '*',
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
