@@ -1,6 +1,7 @@
 import express, { Request, Response, NextFunction, ErrorRequestHandler } from 'express';
 import cors from 'cors';
 import { connectToDatabase, getStockCollection, getReportsCollection, closeConnection } from './config/mongodb.js';
+import { UpdateFilter, Document } from 'mongodb';
 import dotenv from 'dotenv';
 
 // Configurar dotenv
@@ -67,7 +68,27 @@ app.get('/api/test-connection', async (req: express.Request, res: express.Respon
   }
 });
 
-// Interface personalizada para os handlers
+// Interface para o movimento
+interface Movement {
+  date: string;
+  type: string;
+  source: string;
+  destination: string;
+  responsibleUser: string;
+  observations: string;
+  quantity: number;
+}
+
+// Interface para o documento de estoque
+interface StockDocument {
+  items: {
+    v1: { quantity: number; lastUpdate: string };
+    v9: { quantity: number; lastUpdate: string };
+  };
+  movements: Movement[];
+}
+
+// Handler personalizado que permite retorno de Promise
 type AsyncRequestHandler = (req: Request, res: Response) => Promise<any>;
 
 // Rotas de Estoque
@@ -211,7 +232,8 @@ const deleteReport: AsyncRequestHandler = async (req, res) => {
     // Primeiro, buscar o relatório para saber as quantidades
     const report = await collection.findOne({ 'header.date': req.params.date });
     if (!report) {
-      return res.status(404).json({ error: 'Relatório não encontrado' });
+      res.status(404).json({ error: 'Relatório não encontrado' });
+      return;
     }
 
     // Calcular as quantidades totais do relatório
@@ -223,15 +245,16 @@ const deleteReport: AsyncRequestHandler = async (req, res) => {
     // Buscar o estoque atual
     const stock = await stockCollection.findOne();
     if (!stock) {
-      return res.status(404).json({ error: 'Estoque não encontrado' });
+      res.status(404).json({ error: 'Estoque não encontrado' });
+      return;
     }
 
     // Remover as quantidades do estoque
     const newV1Quantity = Math.max(0, (stock.items.v1.quantity || 0) - totalV1);
     const newV9Quantity = Math.max(0, (stock.items.v9.quantity || 0) - totalV9);
 
-    // Atualizar o estoque
-    const adjustmentMovement = {
+    // Criar movimento de ajuste
+    const movement: Movement = {
       date: new Date().toISOString(),
       type: 'adjustment',
       source: 'SISTEMA',
@@ -241,6 +264,7 @@ const deleteReport: AsyncRequestHandler = async (req, res) => {
       quantity: totalV1 + totalV9
     };
 
+    // Atualizar o estoque
     await stockCollection.updateOne(
       {},
       {
@@ -251,7 +275,7 @@ const deleteReport: AsyncRequestHandler = async (req, res) => {
           'items.v9.lastUpdate': new Date().toISOString()
         },
         $push: {
-          movements: adjustmentMovement
+          movements: movement
         }
       }
     );
