@@ -1,6 +1,7 @@
 import express, { Request, Response, NextFunction, ErrorRequestHandler } from 'express';
 import cors from 'cors';
 import { connectToDatabase, getStockCollection, getReportsCollection, closeConnection } from './config/mongodb.js';
+import { UpdateFilter, Document, WithId, PushOperator } from 'mongodb';
 import dotenv from 'dotenv';
 
 // Configurar dotenv
@@ -79,7 +80,7 @@ interface Movement {
 }
 
 // Interface para o documento de estoque
-interface StockDocument {
+interface StockDocument extends WithId<Document> {
   items: {
     v1: { quantity: number; lastUpdate: string };
     v9: { quantity: number; lastUpdate: string };
@@ -87,8 +88,51 @@ interface StockDocument {
   movements: Movement[];
 }
 
+// Interface para o relatório
+interface Report extends WithId<Document> {
+  header: {
+    date: string;
+    supervisor: string;
+    unit: string;
+    shift: 'morning' | 'afternoon';
+  };
+  morning: Array<{
+    name: string;
+    tested: number;
+    approved: number;
+    rejected: number;
+    cleaned: number;
+    resetados: number;
+    v9: number;
+  }>;
+  afternoon: Array<{
+    name: string;
+    v9: number;
+    reset: number;
+    cleaning: number;
+    tested: number;
+    cleaned: number;
+    resetados: number;
+  }>;
+}
+
 // Handler personalizado que permite retorno de Promise
 type AsyncRequestHandler = (req: Request, res: Response) => Promise<any>;
+
+// Tipos específicos para as operações de atualização
+type StockUpdateOperation = {
+  $set: {
+    [key in 'items.v1.quantity' | 'items.v1.lastUpdate' | 'items.v9.quantity' | 'items.v9.lastUpdate']: string | number;
+  };
+};
+
+type MovementPushOperation = {
+  $push: {
+    movements: {
+      $each: Movement[];
+    };
+  };
+};
 
 // Rotas de Estoque
 const getStock: AsyncRequestHandler = async (req, res) => {
@@ -229,7 +273,7 @@ const deleteReport: AsyncRequestHandler = async (req, res) => {
     const stockCollection = await getStockCollection();
     
     // Primeiro, buscar o relatório para saber as quantidades
-    const report = await collection.findOne({ 'header.date': req.params.date });
+    const report = await collection.findOne<Report>({ 'header.date': req.params.date });
     if (!report) {
       res.status(404).json({ error: 'Relatório não encontrado' });
       return;
@@ -242,7 +286,7 @@ const deleteReport: AsyncRequestHandler = async (req, res) => {
       sum + (c.v9 || 0), 0);
 
     // Buscar o estoque atual
-    const stock = await stockCollection.findOne();
+    const stock = await stockCollection.findOne<StockDocument>();
     if (!stock) {
       res.status(404).json({ error: 'Estoque não encontrado' });
       return;
@@ -264,25 +308,28 @@ const deleteReport: AsyncRequestHandler = async (req, res) => {
     };
 
     // Atualizar o estoque
-    const updateOperation = {
+    // Primeiro, atualizar as quantidades
+    await stockCollection.updateOne({}, {
       $set: {
         'items.v1.quantity': newV1Quantity,
         'items.v1.lastUpdate': new Date().toISOString(),
         'items.v9.quantity': newV9Quantity,
         'items.v9.lastUpdate': new Date().toISOString()
-      },
+      }
+    });
+
+    // Depois, adicionar o movimento ao array
+    await stockCollection.updateOne({}, {
       $push: {
         movements: movement
       }
-    } as any; // Usar type assertion temporariamente para resolver o erro de tipagem
-
-    await stockCollection.updateOne({}, updateOperation);
+    } as any); // Usar type assertion apenas para a operação $push
 
     // Finalmente, excluir o relatório
     const result = await collection.deleteOne({ 'header.date': req.params.date });
     
     // Buscar o estoque atualizado
-    const updatedStock = await stockCollection.findOne();
+    const updatedStock = await stockCollection.findOne<StockDocument>();
 
     res.json({ 
       message: 'Relatório excluído e estoque ajustado com sucesso',
