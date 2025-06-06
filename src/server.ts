@@ -162,7 +162,15 @@ const getMovements: AsyncRequestHandler = async (req, res) => {
     const collection = await getStockCollection();
     const stock = await collection.findOne();
     const movements = stock?.movements || [];
-    res.json(movements);
+    
+    // Ordenar movimentos por data, do mais recente para o mais antigo
+    const sortedMovements = movements.sort((a: Movement, b: Movement) => {
+      const dateA = new Date(a.date || '');
+      const dateB = new Date(b.date || '');
+      return dateB.getTime() - dateA.getTime();
+    });
+
+    res.json(sortedMovements);
   } catch (error) {
     console.error('Erro ao buscar movimentações:', error);
     res.status(500).json({ error: 'Falha ao buscar movimentações' });
@@ -181,7 +189,7 @@ const addMovement: AsyncRequestHandler = async (req, res) => {
 
     const movement = {
       ...req.body,
-      timestamp: new Date().toISOString()
+      date: new Date().toISOString() // Usar 'date' consistentemente
     };
 
     const modelKey = req.body.model === 'ZTE 670 V1' ? 'v1' : 'v9';
