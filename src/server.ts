@@ -1,8 +1,7 @@
-import express, { Request, Response, NextFunction, ErrorRequestHandler, RequestHandler } from 'express';
+import express, { Request, Response, NextFunction, ErrorRequestHandler } from 'express';
 import cors from 'cors';
 import { connectToDatabase, getStockCollection, getReportsCollection, closeConnection } from './config/mongodb.js';
 import dotenv from 'dotenv';
-import { ParamsDictionary } from 'express-serve-static-core';
 
 // Configurar dotenv
 dotenv.config();
@@ -68,13 +67,11 @@ app.get('/api/test-connection', async (req: express.Request, res: express.Respon
   }
 });
 
-type CustomRequestHandler = (
-  req: Request<ParamsDictionary>,
-  res: Response
-) => Promise<void> | void;
+// Interface personalizada para os handlers
+type AsyncRequestHandler = (req: Request, res: Response) => Promise<any>;
 
 // Rotas de Estoque
-const getStock: RequestHandler = async (req, res) => {
+const getStock: AsyncRequestHandler = async (req, res) => {
   try {
     const collection = await getStockCollection();
     const stock = await collection.findOne();
@@ -85,7 +82,7 @@ const getStock: RequestHandler = async (req, res) => {
   }
 };
 
-const updateStock: RequestHandler = async (req, res) => {
+const updateStock: AsyncRequestHandler = async (req, res) => {
   try {
     const collection = await getStockCollection();
     const result = await collection.updateOne({}, { $set: req.body }, { upsert: true });
@@ -96,7 +93,7 @@ const updateStock: RequestHandler = async (req, res) => {
   }
 };
 
-const getMovements: RequestHandler = async (req, res) => {
+const getMovements: AsyncRequestHandler = async (req, res) => {
   try {
     const collection = await getStockCollection();
     const stock = await collection.findOne();
@@ -108,7 +105,7 @@ const getMovements: RequestHandler = async (req, res) => {
   }
 };
 
-const addMovement: CustomRequestHandler = async (req, res) => {
+const addMovement: AsyncRequestHandler = async (req, res) => {
   try {
     const collection = await getStockCollection();
     const stock = await collection.findOne();
@@ -153,7 +150,7 @@ const addMovement: CustomRequestHandler = async (req, res) => {
 };
 
 // Rotas de Relatórios
-const getReports: RequestHandler = async (req, res) => {
+const getReports: AsyncRequestHandler = async (req, res) => {
   try {
     const collection = await getReportsCollection();
     const reports = await collection.find({}).toArray();
@@ -164,7 +161,7 @@ const getReports: RequestHandler = async (req, res) => {
   }
 };
 
-const createReport: RequestHandler = async (req, res) => {
+const createReport: AsyncRequestHandler = async (req, res) => {
   try {
     const collection = await getReportsCollection();
     const result = await collection.insertOne(req.body);
@@ -175,7 +172,7 @@ const createReport: RequestHandler = async (req, res) => {
   }
 };
 
-const getReport: CustomRequestHandler = async (req, res) => {
+const getReport: AsyncRequestHandler = async (req, res) => {
   try {
     const collection = await getReportsCollection();
     const report = await collection.findOne({ 'header.date': req.params.date });
@@ -190,7 +187,7 @@ const getReport: CustomRequestHandler = async (req, res) => {
   }
 };
 
-const updateReport: RequestHandler = async (req, res) => {
+const updateReport: AsyncRequestHandler = async (req, res) => {
   try {
     const collection = await getReportsCollection();
     const result = await collection.updateOne(
@@ -206,7 +203,7 @@ const updateReport: RequestHandler = async (req, res) => {
   }
 };
 
-const deleteReport: CustomRequestHandler = async (req, res) => {
+const deleteReport: AsyncRequestHandler = async (req, res) => {
   try {
     const collection = await getReportsCollection();
     const stockCollection = await getStockCollection();
@@ -234,6 +231,16 @@ const deleteReport: CustomRequestHandler = async (req, res) => {
     const newV9Quantity = Math.max(0, (stock.items.v9.quantity || 0) - totalV9);
 
     // Atualizar o estoque
+    const adjustmentMovement = {
+      date: new Date().toISOString(),
+      type: 'adjustment',
+      source: 'SISTEMA',
+      destination: 'AJUSTE',
+      responsibleUser: 'Sistema',
+      observations: `Ajuste automático por exclusão do relatório de ${req.params.date}`,
+      quantity: totalV1 + totalV9
+    };
+
     await stockCollection.updateOne(
       {},
       {
@@ -243,18 +250,8 @@ const deleteReport: CustomRequestHandler = async (req, res) => {
           'items.v9.quantity': newV9Quantity,
           'items.v9.lastUpdate': new Date().toISOString()
         },
-        $push: { 
-          movements: {
-            $each: [{
-              date: new Date().toISOString(),
-              type: 'adjustment',
-              source: 'SISTEMA',
-              destination: 'AJUSTE',
-              responsibleUser: 'Sistema',
-              observations: `Ajuste automático por exclusão do relatório de ${req.params.date}`,
-              quantity: totalV1 + totalV9
-            }]
-          }
+        $push: {
+          movements: adjustmentMovement
         }
       }
     );
