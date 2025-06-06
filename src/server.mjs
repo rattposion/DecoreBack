@@ -284,32 +284,66 @@ app.use((err, req, res, next) => {
 });
 
 // Iniciar servidor
-const server = app.listen(port, '0.0.0.0', () => {
-  console.log(`Servidor rodando em modo ${process.env.NODE_ENV || 'development'}`);
-  console.log(`URL do servidor: ${process.env.NODE_ENV === 'production' ? process.env.RAILWAY_STATIC_URL : `http://localhost:${port}`}`);
-});
+const startServer = async () => {
+  try {
+    // Tentar conectar ao MongoDB antes de iniciar o servidor
+    await connectToDatabase();
+    
+    const server = app.listen(port, '0.0.0.0', () => {
+      console.log(`Servidor rodando em modo ${process.env.NODE_ENV || 'development'}`);
+      console.log(`URL do servidor: ${process.env.NODE_ENV === 'production' ? process.env.RAILWAY_STATIC_URL : `http://localhost:${port}`}`);
+    });
 
-// Tratamento de erros do servidor
-server.on('error', (error) => {
-  if (error.code === 'EADDRINUSE') {
-    console.error(`Porta ${port} já está em uso. Tente outra porta.`);
-  } else {
-    console.error('Erro no servidor:', error);
+    // Tratamento de erros do servidor
+    server.on('error', (error) => {
+      if (error.code === 'EADDRINUSE') {
+        console.error(`Porta ${port} já está em uso. Tente outra porta.`);
+      } else {
+        console.error('Erro no servidor:', error);
+      }
+      process.exit(1);
+    });
+
+    // Desligamento gracioso
+    process.on('SIGINT', async () => {
+      console.log('\nDesligando servidor graciosamente...');
+      server.close(async () => {
+        try {
+          await closeConnection();
+          console.log('Servidor fechado');
+          process.exit(0);
+        } catch (error) {
+          console.error('Erro ao fechar servidor:', error);
+          process.exit(1);
+        }
+      });
+    });
+
+  } catch (error) {
+    console.error('Erro fatal ao iniciar servidor:', error);
+    process.exit(1);
   }
-  process.exit(1);
-});
+};
 
-// Desligamento gracioso
-process.on('SIGINT', async () => {
-  console.log('\nDesligando servidor graciosamente...');
-  server.close(async () => {
-    try {
-      await closeConnection();
-      console.log('Servidor fechado');
-      process.exit(0);
-    } catch (error) {
-      console.error('Erro ao fechar servidor:', error);
+// Iniciar o servidor com retry
+let retryCount = 0;
+const MAX_RETRIES = 5;
+
+const startWithRetry = async () => {
+  try {
+    await startServer();
+  } catch (error) {
+    retryCount++;
+    console.error(`Tentativa ${retryCount} de iniciar o servidor falhou:`, error);
+    
+    if (retryCount < MAX_RETRIES) {
+      console.log(`Tentando novamente em ${retryCount * 5} segundos...`);
+      setTimeout(startWithRetry, retryCount * 5000);
+    } else {
+      console.error(`Falha após ${MAX_RETRIES} tentativas. Encerrando.`);
       process.exit(1);
     }
-  });
-}); 
+  }
+};
+
+startWithRetry(); 
